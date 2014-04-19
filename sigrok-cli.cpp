@@ -19,6 +19,7 @@
 
 #include <libsigrok/libsigrok.hpp>
 #include "cpp-optparse/OptionParser.h"
+#include <utility>
 
 using namespace std;
 using namespace sigrok;
@@ -228,12 +229,20 @@ int main(int argc, char *argv[])
         device = hwdevice;
 
         /* Apply device settings from command line. */
-        if (args.is_set("time"))
-            hwdevice->config_set(ConfigKey::LIMIT_MSEC, args["time"]);
-        if (args.is_set("samples"))
-            hwdevice->config_set(ConfigKey::LIMIT_SAMPLES, args["samples"]);
-        if (args.is_set("frames"))
-            hwdevice->config_set(ConfigKey::LIMIT_FRAMES, args["frames"]);
+        vector<pair<const ConfigKey *, string>> options = {
+            {ConfigKey::LIMIT_MSEC, "time"},
+            {ConfigKey::LIMIT_SAMPLES, "samples"},
+            {ConfigKey::LIMIT_FRAMES, "frames"}};
+        for (auto option : options)
+        {
+            auto key = option.first;
+            auto name = option.second;
+            if (args.is_set(name))
+            {
+                auto value = args[name];
+                hwdevice->config_set(key, key->parse_string(value));
+            }
+        }
 
         if (args.is_set("config"))
         {
@@ -246,7 +255,7 @@ int main(int argc, char *argv[])
                 auto parts = split(pair, '=');
                 auto name = parts.front(), value = parts.back();
                 auto key = ConfigKey::get(name);
-                hwdevice->config_set(key, value);
+                hwdevice->config_set(key, key->parse_string(value));
             }
         }
     }
