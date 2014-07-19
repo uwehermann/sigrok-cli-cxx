@@ -20,6 +20,7 @@
 #include <libsigrok/libsigrok.hpp>
 #include "cpp-optparse/OptionParser.h"
 #include <utility>
+#include <unordered_set>
 
 using namespace std;
 using namespace sigrok;
@@ -117,7 +118,7 @@ int main(int argc, char *argv[])
             auto driver = entry.second;
             printf("  %-20s %s\n",
                 driver->get_name().c_str(),
-                driver->get_longname().c_str());
+                driver->get_long_name().c_str());
         }
         printf("\nSupported input formats:\n");
         for (auto entry : context->get_input_formats())
@@ -140,7 +141,7 @@ int main(int argc, char *argv[])
     }
 
     if (args.is_set("loglevel"))
-        context->set_loglevel(LogLevel::get(stoi(args["loglevel"])));
+        context->set_log_level(LogLevel::get(stoi(args["loglevel"])));
 
     if (args.is_set("scan") && !args.is_set("driver"))
     {
@@ -285,7 +286,7 @@ int main(int argc, char *argv[])
     auto output = output_format->create_output(device);
 
     /* Add datafeed callback. */
-    session->add_callback([=] (
+    session->add_datafeed_callback([=] (
         shared_ptr<Device> device,
         shared_ptr<Packet> packet)
     {
