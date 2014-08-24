@@ -157,41 +157,11 @@ int main(int argc, char *argv[])
 
     shared_ptr<Device> device;
     shared_ptr<HardwareDevice> hwdevice;
-    shared_ptr<InputFileDevice> ifdevice;
+    shared_ptr<InputDevice> ifdevice;
 
     if (args.is_set("input_file"))
     {
-        /* Load data from a file. */
-        shared_ptr<InputFormat> format;
-        auto formats = context->get_input_formats();
-
-        if (args.is_set("input_format"))
-        {
-            /* Use specified input format. */
-            format = formats[args["input_format"]];
-        }
-        else
-        {
-            /* Find first input format that matches data. */
-            bool matched = false;
-            for (auto entry : formats)
-            {
-                format = entry.second;
-                if (format->format_match(args["input_file"]))
-                {
-                    matched = true;
-                    break;
-                }
-            }
-            if (!matched)
-            {
-                printf("File not in any recognised input format.\n");
-                return 1;
-            }
-        }
-
-        /* Open virtual device for input file. */
-        ifdevice = format->open_file(args["input_file"], {});
+        ifdevice = context->open_file(args["input_file"])->get_device();
         device = ifdevice;
     }
     else if (args.is_set("driver"))
@@ -295,35 +265,26 @@ int main(int argc, char *argv[])
             printf("%s", text.c_str());
     });
 
-    if (args.is_set("input_file"))
+    /* Start capture. */
+    session->start();
+    if (args.is_set("continuous"))
     {
-        /* Load data from file. */
-        ifdevice->load();
-        session->stop();
+        /* Continuous capture, set SIGINT handler to allow stopping. */
+        sigint_handler = [=] () { session->stop(); };
+        signal(SIGINT, sigint);
     }
+
+    /* Run event loop. */
+    session->run();
+
+    /* Clean up. */
+    if (args.is_set("continuous"))
+        sigint_handler = nullptr;
     else
-    {
-        /* Start capture. */
-        session->start();
-        if (args.is_set("continuous"))
-        {
-            /* Continuous capture, set SIGINT handler to allow stopping. */
-            sigint_handler = [=] () { session->stop(); };
-            signal(SIGINT, sigint);
-        }
+        session->stop();
 
-        /* Run event loop. */
-        session->run();
-
-        /* Clean up. */
-        if (args.is_set("continuous"))
-            sigint_handler = nullptr;
-        else
-            session->stop();
-
-        /* Close device. */
-        device->close();
-    }
+    /* Close device. */
+    device->close();
 
     return 0;
 }
