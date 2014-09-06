@@ -21,6 +21,7 @@
 #include "cpp-optparse/OptionParser.h"
 #include <utility>
 #include <unordered_set>
+#include <fstream>
 
 using namespace std;
 using namespace sigrok;
@@ -155,14 +156,21 @@ int main(int argc, char *argv[])
         return 0;
     }
 
+    shared_ptr<Session> session;
     shared_ptr<Device> device;
-    shared_ptr<HardwareDevice> hwdevice;
-    shared_ptr<InputDevice> ifdevice;
+    shared_ptr<Input> input;
 
     if (args.is_set("input_file"))
     {
-        ifdevice = context->open_file(args["input_file"])->get_device();
-        device = ifdevice;
+        try {
+            session = context->load_session(args["input_file"]);
+            device = session->get_devices()[0];
+        }
+        catch (Error)
+        {
+            input = context->open_file(args["input_file"]);
+            device = input->get_device();
+        }
     }
     else if (args.is_set("driver"))
     {
@@ -195,7 +203,7 @@ int main(int argc, char *argv[])
         }
 
         /* Use first device found. */
-        hwdevice = devices.front();
+        auto hwdevice = devices.front();
         hwdevice->open();
         device = hwdevice;
 
@@ -247,9 +255,12 @@ int main(int argc, char *argv[])
         return 0;
     }
 
-    /* Create session and add device. */
-    auto session = context->create_session();
-    session->add_device(device);
+    if (!session)
+    {
+        /* Create session and add device. */
+        session = context->create_session();
+        session->add_device(device);
+    }
 
     /* Create output. */
     auto output_format = context->get_output_formats()[args["output_format"]];
@@ -265,17 +276,34 @@ int main(int argc, char *argv[])
             printf("%s", text.c_str());
     });
 
-    /* Start capture. */
-    session->start();
-    if (args.is_set("continuous"))
+    if (input)
     {
-        /* Continuous capture, set SIGINT handler to allow stopping. */
-        sigint_handler = [=] () { session->stop(); };
-        signal(SIGINT, sigint);
-    }
+        /* Read data from file and feed to input object. */
+        const size_t bufsize = 1024;
+        char buf[bufsize];
 
-    /* Run event loop. */
-    session->run();
+        ifstream file(args["input_file"], ifstream::in | ifstream::binary);
+
+        while (file.good())
+        {
+            file.read(buf, bufsize);
+            input->send(string(buf, file.gcount()));
+        }
+    }
+    else
+    {
+        /* Start capture. */
+        session->start();
+        if (args.is_set("continuous"))
+        {
+            /* Continuous capture, set SIGINT handler to allow stopping. */
+            sigint_handler = [=] () { session->stop(); };
+            signal(SIGINT, sigint);
+        }
+
+        /* Run event loop. */
+        session->run();
+    }
 
     /* Clean up. */
     if (args.is_set("continuous"))
