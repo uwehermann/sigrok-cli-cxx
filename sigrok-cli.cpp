@@ -32,16 +32,16 @@ const char *VERSION = "0.1";
 /* Helper function to print a one-line description of a device. */
 void print_device_info(shared_ptr<HardwareDevice> device)
 {
-    printf("%s -", device->get_driver()->get_name().c_str());
+    printf("%s -", device->driver()->name().c_str());
     vector<string> parts =
-        {device->get_vendor(), device->get_model(), device->get_version()};
+        {device->vendor(), device->model(), device->version()};
     for (string part : parts)
         if (part.length() > 0)
             printf(" %s", part.c_str());
-    auto channels = device->get_channels();
+    auto channels = device->channels();
     printf(" with %zd channels:", channels.size());
     for (auto channel : channels)
-        printf(" %s", channel->get_name().c_str());
+        printf(" %s", channel->name().c_str());
     printf("\n");
 }
 
@@ -111,31 +111,31 @@ int main(int argc, char *argv[])
         /* Display version information. */
         printf("%s %s", argv[0], VERSION);
         printf("\nUsing libsigrok %s (lib version %s).",
-            context->get_package_version().c_str(),
-            context->get_lib_version().c_str());
+            context->package_version().c_str(),
+            context->lib_version().c_str());
         printf("\nSupported hardware drivers:\n");
-        for (auto entry : context->get_drivers())
+        for (auto entry : context->drivers())
         {
             auto driver = entry.second;
             printf("  %-20s %s\n",
-                driver->get_name().c_str(),
-                driver->get_long_name().c_str());
+                driver->name().c_str(),
+                driver->long_name().c_str());
         }
         printf("\nSupported input formats:\n");
-        for (auto entry : context->get_input_formats())
+        for (auto entry : context->input_formats())
         {
             auto input = entry.second;
             printf("  %-20s %s\n",
-                input->get_name().c_str(),
-                input->get_description().c_str());
+                input->name().c_str(),
+                input->description().c_str());
         }
         printf("\nSupported output formats:\n");
-        for (auto entry : context->get_output_formats())
+        for (auto entry : context->output_formats())
         {
             auto output = entry.second;
             printf("  %-20s %s\n",
-                output->get_name().c_str(),
-                output->get_description().c_str());
+                output->name().c_str(),
+                output->description().c_str());
         }
         printf("\n");
         return 0;
@@ -147,7 +147,7 @@ int main(int argc, char *argv[])
     if (args.is_set("scan") && !args.is_set("driver"))
     {
         /* Scan for devices using all drivers. */
-        for (auto entry : context->get_drivers())
+        for (auto entry : context->drivers())
         {
             auto driver = entry.second;
             for (auto device : driver->scan({}))
@@ -164,12 +164,12 @@ int main(int argc, char *argv[])
     {
         try {
             session = context->load_session(args["input_file"]);
-            device = session->get_devices()[0];
+            device = session->devices()[0];
         }
         catch (Error)
         {
             input = context->open_file(args["input_file"]);
-            device = input->get_device();
+            device = input->device();
         }
     }
     else if (args.is_set("driver"))
@@ -178,7 +178,7 @@ int main(int argc, char *argv[])
         auto driver_spec = split(args["driver"], ':');
 
         /* Use specified driver. */
-        auto driver = context->get_drivers()[driver_spec.front()];
+        auto driver = context->drivers()[driver_spec.front()];
         driver_spec.pop_front();
 
         /* Parse key=value configuration pairs. */
@@ -244,8 +244,8 @@ int main(int argc, char *argv[])
         /* Enable selected channels only. */
         auto enabled = split(args["channels"], ',');
         auto enabled_set = unordered_set<string>(enabled.begin(), enabled.end());
-        for (auto channel : device->get_channels())
-            channel->set_enabled(enabled_set.count(channel->get_name()));
+        for (auto channel : device->channels())
+            channel->set_enabled(enabled_set.count(channel->name()));
     }
 
     if (args.is_set("set"))
@@ -263,7 +263,7 @@ int main(int argc, char *argv[])
     }
 
     /* Create output. */
-    auto output_format = context->get_output_formats()[args["output_format"]];
+    auto output_format = context->output_formats()[args["output_format"]];
     auto output = output_format->create_output(device);
 
     /* Add datafeed callback. */
