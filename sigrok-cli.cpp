@@ -187,7 +187,7 @@ int main(int argc, char *argv[])
         {
             auto parts = split(pair, '=');
             auto name = parts.front(), value = parts.back();
-            auto key = ConfigKey::get(name);
+            auto key = ConfigKey::get_by_identifier(name);
             scan_options[key] = key->parse_string(value);
         }
 
@@ -233,7 +233,7 @@ int main(int argc, char *argv[])
             {
                 auto parts = split(pair, '=');
                 auto name = parts.front(), value = parts.back();
-                auto key = ConfigKey::get(name);
+                auto key = ConfigKey::get_by_identifier(name);
                 hwdevice->config_set(key, key->parse_string(value));
             }
         }
