@@ -16,7 +16,7 @@
 ## You should have received a copy of the GNU General Public License
 ## along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-CXXFLAGS=$(shell pkg-config --cflags --libs libsigrokxx)
+CXXFLAGS=$(shell pkg-config --cflags --libs libsigrokcxx)
 
 sigrok-cli-c++: sigrok-cli.cpp cpp-optparse/OptionParser.cpp
 	g++ -std=c++11 $^ $(CXXFLAGS) -o $@

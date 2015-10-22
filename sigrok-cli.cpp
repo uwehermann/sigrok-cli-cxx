@@ -17,7 +17,7 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <libsigrok/libsigrok.hpp>
+#include <libsigrokcxx/libsigrokcxx.hpp>
 #include "cpp-optparse/OptionParser.h"
 #include <utility>
 #include <unordered_set>
@@ -162,14 +162,25 @@ int main(int argc, char *argv[])
 
     if (args.is_set("input_file"))
     {
-        try {
-            session = context->load_session(args["input_file"]);
-            device = session->devices()[0];
-        }
-        catch (Error)
+        if (args.is_set("input_format"))
         {
-            input = context->open_file(args["input_file"]);
-            device = input->device();
+            auto format = context->input_formats()[args["input_format"]];
+            map<string, Glib::VariantBase> options;
+            for (auto entry : format->options())
+                if (entry.first == "filename")
+                    options["filename"] =
+                        Glib::Variant<Glib::ustring>::create(args["input_file"]);
+            input = format->create_input(options);
+        }
+        else
+        {
+            try {
+                session = context->load_session(args["input_file"]);
+            }
+            catch (Error)
+            {
+                input = context->open_file(args["input_file"]);
+            }
         }
     }
     else if (args.is_set("driver"))
@@ -239,6 +250,32 @@ int main(int argc, char *argv[])
         }
     }
 
+    ifstream *file;
+    const size_t bufsize = 1024;
+    char buf[bufsize];
+
+    if (input)
+    {
+        file = new ifstream(args["input_file"], ifstream::in | ifstream::binary);
+        while (file->good())
+        {
+            file->read(buf, bufsize);
+            input->send(&buf, file->gcount()); 
+            if (!device)
+            {
+                try
+                {
+                    device = input->device();
+                    break;
+                }
+                catch (Error e)
+                {
+                    continue;
+                }
+            }
+        }
+    }
+
     if (args.is_set("channels"))
     {
         /* Enable selected channels only. */
@@ -278,17 +315,13 @@ int main(int argc, char *argv[])
 
     if (input)
     {
-        /* Read data from file and feed to input object. */
-        const size_t bufsize = 1024;
-        char buf[bufsize];
-
-        ifstream file(args["input_file"], ifstream::in | ifstream::binary);
-
-        while (file.good())
+        while (file->good())
         {
-            file.read(buf, bufsize);
-            input->send(string(buf, file.gcount()));
+            file->read(buf, bufsize);
+            input->send(buf, file->gcount());
         }
+
+        delete file;
     }
     else
     {
