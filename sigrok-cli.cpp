@@ -17,7 +17,7 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <libsigrokcxx/libsigrokcxx.hpp>
+#include <libsigrokflow/libsigrokflow.hpp>
 #include "cpp-optparse/OptionParser.h"
 #include <utility>
 #include <unordered_set>
