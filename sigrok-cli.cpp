@@ -29,6 +29,8 @@ using optparse::OptionParser;
 
 const char *VERSION = "0.1";
 
+Glib::RefPtr<Glib::MainLoop> main_loop;
+
 /* Helper function to print a one-line description of a device. */
 void print_device_info(shared_ptr<HardwareDevice> device)
 {
@@ -56,17 +58,24 @@ list<string> split(const string s, char delim)
     return elems;
 }
 
-/* Callable object for SIGINT handling. */
-function<void()> sigint_handler;
-
-/* C signal handler shim. */
-void sigint(int signum)
+bool bus_message_watch(const Glib::RefPtr<Gst::Bus>&,
+        const Glib::RefPtr<Gst::Message>& message)
 {
-    sigint_handler();
+        switch (message->get_message_type()) {
+        case Gst::MESSAGE_EOS:
+                main_loop->quit();
+                break;
+        default:
+                break;
+        }
+        return true;
 }
 
 int main(int argc, char *argv[])
 {
+    Gst::init();
+    Srf::init();
+
     OptionParser parser = OptionParser();
 
     /* Set up command line options. */
@@ -156,32 +165,27 @@ int main(int argc, char *argv[])
         return 0;
     }
 
-    shared_ptr<Session> session;
+    auto pipeline = Gst::Pipeline::create();
+    Glib::RefPtr<Gst::Element> source;
     shared_ptr<Device> device;
-    shared_ptr<Input> input;
 
     if (args.is_set("input_file"))
     {
+        auto filesrc = Gst::ElementFactory::create_element("filesrc");
+        filesrc->set_property(Glib::ustring("location"), args["input_file"]);
+        string format_name = "srzip";
         if (args.is_set("input_format"))
-        {
-            auto format = context->input_formats()[args["input_format"]];
-            map<string, Glib::VariantBase> options;
-            for (auto entry : format->options())
-                if (entry.first == "filename")
-                    options["filename"] =
-                        Glib::Variant<Glib::ustring>::create(args["input_file"]);
-            input = format->create_input(options);
-        }
-        else
-        {
-            try {
-                session = context->load_session(args["input_file"]);
-            }
-            catch (Error)
-            {
-                input = context->open_file(args["input_file"]);
-            }
-        }
+            format_name = args["input_format"];
+        auto format = context->input_formats()[format_name];
+        map<string, Glib::VariantBase> options;
+        for (auto entry : format->options())
+            if (entry.first == "filename")
+                options["filename"] =
+                    Glib::Variant<Glib::ustring>::create(args["input_file"]);
+        source = Srf::LegacyInput::create(format, options);
+        pipeline->add(filesrc);
+        pipeline->add(source);
+        filesrc->link(source);
     }
     else if (args.is_set("driver"))
     {
@@ -218,6 +222,9 @@ int main(int argc, char *argv[])
         hwdevice->open();
         device = hwdevice;
 
+        source = Srf::LegacyCaptureDevice::create(hwdevice);
+        pipeline->add(source);
+
         /* Apply device settings from command line. */
         vector<pair<const ConfigKey *, string>> options = {
             {ConfigKey::LIMIT_MSEC, "time"},
@@ -250,32 +257,6 @@ int main(int argc, char *argv[])
         }
     }
 
-    ifstream *file;
-    const size_t bufsize = 1024;
-    char buf[bufsize];
-
-    if (input)
-    {
-        file = new ifstream(args["input_file"], ifstream::in | ifstream::binary);
-        while (file->good())
-        {
-            file->read(buf, bufsize);
-            input->send(&buf, file->gcount()); 
-            if (!device)
-            {
-                try
-                {
-                    device = input->device();
-                    break;
-                }
-                catch (Error e)
-                {
-                    continue;
-                }
-            }
-        }
-    }
-
     if (args.is_set("channels"))
     {
         /* Enable selected channels only. */
@@ -292,60 +273,20 @@ int main(int argc, char *argv[])
         return 0;
     }
 
-    if (!session)
-    {
-        /* Create session and add device. */
-        session = context->create_session();
-        session->add_device(device);
-    }
-
     /* Create output. */
     auto output_format = context->output_formats()[args["output_format"]];
-    auto output = output_format->create_output(device);
+    auto output = Srf::LegacyOutput::create(output_format, device);
+    pipeline->add(output);
+    source->link(output);
 
-    /* Add datafeed callback. */
-    session->add_datafeed_callback([=] (
-        shared_ptr<Device> device,
-        shared_ptr<Packet> packet)
-    {
-        string text = output->receive(packet);
-        if (text.length() > 0)
-            printf("%s", text.c_str());
-    });
+    main_loop = Glib::MainLoop::create();
 
-    if (input)
-    {
-        while (file->good())
-        {
-            file->read(buf, bufsize);
-            input->send(buf, file->gcount());
-        }
+    auto bus = pipeline->get_bus();
+    bus->add_watch(sigc::ptr_fun(bus_message_watch));
 
-        delete file;
-    }
-    else
-    {
-        /* Start capture. */
-        session->start();
-        if (args.is_set("continuous"))
-        {
-            /* Continuous capture, set SIGINT handler to allow stopping. */
-            sigint_handler = [=] () { session->stop(); };
-            signal(SIGINT, sigint);
-        }
-
-        /* Run event loop. */
-        session->run();
-    }
-
-    /* Clean up. */
-    if (args.is_set("continuous"))
-        sigint_handler = nullptr;
-    else
-        session->stop();
-
-    /* Close device. */
-    device->close();
+    pipeline->set_state(Gst::STATE_PLAYING);
+    main_loop->run();
+    pipeline->set_state(Gst::STATE_NULL);
 
     return 0;
 }
