@@ -257,7 +257,7 @@ int main(int argc, char *argv[])
         }
     }
 
-    if (args.is_set("channels"))
+    if (device && args.is_set("channels"))
     {
         /* Enable selected channels only. */
         auto enabled = split(args["channels"], ',');
