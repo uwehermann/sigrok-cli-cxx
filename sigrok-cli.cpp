@@ -275,7 +275,7 @@ int main(int argc, char *argv[])
 
     /* Create output. */
     auto output_format = context->output_formats()[args["output_format"]];
-    auto output = Srf::LegacyOutput::create(output_format, device);
+    auto output = Srf::LegacyOutput::create(output_format);
     pipeline->add(output);
     source->link(output);
 
