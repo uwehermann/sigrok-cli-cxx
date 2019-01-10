@@ -18,6 +18,7 @@
  */
 
 #include <libsigrokflow/libsigrokflow.hpp>
+#include <libsigrokdecode/libsigrokdecode.h>
 #include "cpp-optparse/OptionParser.h"
 #include <utility>
 #include <unordered_set>
@@ -71,10 +72,19 @@ bool bus_message_watch(const Glib::RefPtr<Gst::Bus>&,
         return true;
 }
 
+static gint sort_pds(gconstpointer a, gconstpointer b)
+{
+        const struct srd_decoder *sda = (const srd_decoder *)a;
+        const struct srd_decoder *sdb = (const srd_decoder *)b;
+
+        return strcmp(sda->id, sdb->id);
+}
+
 int main(int argc, char *argv[])
 {
     Gst::init();
     Srf::init();
+    srd_init(NULL);
 
     OptionParser parser = OptionParser();
 
@@ -146,6 +156,22 @@ int main(int argc, char *argv[])
                 output->name().c_str(),
                 output->description().c_str());
         }
+        printf("\nSupported protocol decoders:\n");
+        srd_decoder_load_all();
+        GSList *sl = g_slist_copy((GSList *)srd_decoder_list());
+        sl = g_slist_sort(sl, sort_pds);
+        for (GSList *l = sl; l; l = l->next) {
+                struct srd_decoder *dec = (srd_decoder *)l->data;
+                printf("  %-20s %s\n", dec->id, dec->longname);
+                /* Print protocol description upon "-l 3" or higher. */
+                int loglevel = SRD_LOG_WARN;
+                if (args.is_set("loglevel"))
+                        loglevel = stoi(args["loglevel"]);
+                if (loglevel >= SRD_LOG_INFO)
+                        printf("  %-20s %s\n", "", dec->desc);
+        }
+        g_slist_free(sl);
+        srd_exit();
         printf("\n");
         return 0;
     }
