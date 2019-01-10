@@ -84,7 +84,7 @@ int main(int argc, char *argv[])
     parser.add_option("-d", "--driver").help("The driver to use");
     parser.add_option("-c", "--config").help("Specify device configuration options");
     parser.add_option("-i", "--input-file").help("Load input from file").dest("input_file");
-    parser.add_option("-I", "--input-format").help("Input format");
+    parser.add_option("-I", "--input-format").help("Input format").set_default("binary");
     parser.add_option("-O", "--output-format").help("Output format").set_default("bits");
     parser.add_option("-p", "--channels").help("Channels to use");
     parser.add_option("-g", "--channel-group").help("Channel group to use");
