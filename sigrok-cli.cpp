@@ -80,6 +80,20 @@ static gint sort_pds(gconstpointer a, gconstpointer b)
         return strcmp(sda->id, sdb->id);
 }
 
+void pd_ann_cb(struct srd_proto_data *pdata, void *cb_data)
+{
+        struct srd_proto_data_annotation *pda;
+
+        (void)cb_data;
+
+        pda = (srd_proto_data_annotation *)pdata->data;
+
+        printf("        %" PRIu64 "-%" PRIu64 " ", pdata->start_sample, pdata->end_sample);
+        printf("%s: ", pdata->pdo->proto_id);
+        printf("%s%s%s", "'", pda->ann_text[0], "'");
+        printf("\n");
+}
+
 int main(int argc, char *argv[])
 {
     Gst::init();
@@ -90,7 +104,7 @@ int main(int argc, char *argv[])
 
     /* Set up command line options. */
     parser.add_option("-V", "--version").help("Show version").action("store_true");
-    parser.add_option("-l", "--loglevel").help("Set log level").type("int");
+    parser.add_option("-l", "--loglevel").help("Set log level").type("int").set_default(2);
     parser.add_option("-d", "--driver").help("The driver to use");
     parser.add_option("-c", "--config").help("Specify device configuration options");
     parser.add_option("-i", "--input-file").help("Load input from file").dest("input_file");
@@ -98,6 +112,7 @@ int main(int argc, char *argv[])
     parser.add_option("-O", "--output-format").help("Output format").set_default("bits");
     parser.add_option("-p", "--channels").help("Channels to use");
     parser.add_option("-g", "--channel-group").help("Channel group to use");
+    parser.add_option("-P", "--protocol-decoders").help("Protocol decoders to use");
     parser.add_option("--scan").help("Scan for devices").action("store_true");
     parser.add_option("--time").help("How long to sample (ms)");
     parser.add_option("--samples").help("Number of samples to acquire");
@@ -117,7 +132,8 @@ int main(int argc, char *argv[])
             args.is_set("samples") ||
             args.is_set("frames") ||
             args.is_set("continuous")))
-        || args.is_set("input_file")))
+        || args.is_set("input_file")
+        || args.is_set("protocol_decoders")))
     {
         parser.print_help();
         return 1;
@@ -163,11 +179,7 @@ int main(int argc, char *argv[])
         for (GSList *l = sl; l; l = l->next) {
                 struct srd_decoder *dec = (srd_decoder *)l->data;
                 printf("  %-20s %s\n", dec->id, dec->longname);
-                /* Print protocol description upon "-l 3" or higher. */
-                int loglevel = SRD_LOG_WARN;
-                if (args.is_set("loglevel"))
-                        loglevel = stoi(args["loglevel"]);
-                if (loglevel >= SRD_LOG_INFO)
+                if (stoi(args["loglevel"]) >= SRD_LOG_INFO)
                         printf("  %-20s %s\n", "", dec->desc);
         }
         g_slist_free(sl);
@@ -176,8 +188,7 @@ int main(int argc, char *argv[])
         return 0;
     }
 
-    if (args.is_set("loglevel"))
-        context->set_log_level(LogLevel::get(stoi(args["loglevel"])));
+    context->set_log_level(LogLevel::get(stoi(args["loglevel"])));
 
     if (args.is_set("scan") && !args.is_set("driver"))
     {
@@ -208,6 +219,11 @@ int main(int argc, char *argv[])
             if (entry.first == "filename")
                 options["filename"] =
                     Glib::Variant<Glib::ustring>::create(args["input_file"]);
+
+        /* TODO: Don't hardcode samplerate and numchannels. */
+        options["samplerate"] = Glib::Variant<uint64_t>::create(1000000);
+        options["numchannels"] = Glib::Variant<int32_t>::create(8);
+
         source = Srf::LegacyInput::create(format, options);
         pipeline->add(filesrc);
         pipeline->add(source);
@@ -283,6 +299,36 @@ int main(int argc, char *argv[])
         }
     }
 
+    string pd_name;
+    GHashTable *channel_indices;
+
+    if (args.is_set("protocol_decoders"))
+    {
+        /* TODO: Currently only supports one decoder, no stacking. */
+        /* TODO: Currently only supports specifying channels by index (not name). */
+
+        /* Separate decoder name and decoder options. */
+        auto pd_spec = split(args["protocol_decoders"], ':');
+
+        pd_name = pd_spec.front();
+        pd_spec.pop_front();
+
+        channel_indices = g_hash_table_new_full(
+            g_str_hash, g_str_equal, g_free, (GDestroyNotify)g_variant_unref);
+
+        /* Parse and apply key=value decoder channel/option pairs. */
+        for (auto pair : pd_spec)
+        {
+            auto parts = split(pair, '=');
+            auto ch_name = parts.front();
+            auto ch_idx = stoi(parts.back());
+
+            GVariant *var = g_variant_new_int32(ch_idx);
+            g_variant_ref_sink(var);
+            g_hash_table_insert(channel_indices, g_strdup(ch_name.c_str()), var);
+        }
+    }
+
     if (device && args.is_set("channels"))
     {
         /* Enable selected channels only. */
@@ -299,11 +345,36 @@ int main(int argc, char *argv[])
         return 0;
     }
 
-    /* Create output. */
-    auto output_format = context->output_formats()[args["output_format"]];
-    auto output = Srf::LegacyOutput::create(output_format);
-    pipeline->add(output);
-    source->link(output);
+    if (args.is_set("protocol_decoders"))
+    {
+        struct srd_decoder_inst *di;
+        GHashTable *options;
+        struct srd_session *session;
+
+        // srd_log_loglevel_set(5);
+        srd_init(nullptr);
+        srd_decoder_load_all();
+        srd_session_new(&session);
+        options = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, (GDestroyNotify)g_variant_unref);
+        di = srd_inst_new(session, pd_name.c_str(), options); /* TODO: Options. */
+
+        srd_inst_channel_set_all(di, channel_indices);
+        srd_session_metadata_set(session, SRD_CONF_SAMPLERATE, g_variant_new_uint64(1000000)); /* TODO: Samplerate. */
+        srd_pd_output_callback_add(session, SRD_OUTPUT_ANN, pd_ann_cb, NULL);
+
+        auto decoder = Srf::LegacyDecoder::create(session, 1 /* TODO: unitsize */);
+
+        pipeline->add(decoder);
+        source->link(decoder);
+    }
+    else
+    {
+        /* Create output. */
+        auto output_format = context->output_formats()[args["output_format"]];
+        auto output = Srf::LegacyOutput::create(output_format);
+        pipeline->add(output);
+        source->link(output);
+    }
 
     main_loop = Glib::MainLoop::create();
 
