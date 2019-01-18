@@ -22,4 +22,4 @@ sigrok-cli-c++: sigrok-cli.cpp cpp-optparse/OptionParser.cpp
 	g++ -std=c++11 $^ $(CXXFLAGS) -o $@
 
 clean:
-	rm sigrok-cli-c++
+	rm -f sigrok-cli-c++
